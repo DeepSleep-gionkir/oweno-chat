@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PocketBase from "pocketbase";
 import "./App.css";
 
@@ -150,19 +150,85 @@ function ChatRoom({ currentUser, onLogout }) {
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const scrollRef = useRef(null);
+  const cacheKey = useMemo(
+    () => `chat-cache-${currentUser?.id || "anonymous"}`,
+    [currentUser?.id],
+  );
+
+  const sortMessages = useCallback(
+    (list) =>
+      [...list].sort(
+        (a, b) => new Date(a.created || 0) - new Date(b.created || 0),
+      ),
+    [],
+  );
+
+  const pruneMessages = useCallback(
+    (list, limit = 100) => {
+      const sorted = sortMessages(list);
+      return sorted.slice(-limit);
+    },
+    [sortMessages],
+  );
+
+  const readCache = useCallback(() => {
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return null;
+      return parsed;
+    } catch (error) {
+      console.error("캐시 읽기 실패:", error);
+      return null;
+    }
+  }, [cacheKey]);
+
+  const writeCache = useCallback(
+    (list) => {
+      try {
+        localStorage.setItem(cacheKey, JSON.stringify(list));
+      } catch (error) {
+        console.error("캐시 저장 실패:", error);
+      }
+    },
+    [cacheKey],
+  );
+
+  const upsertMessage = useCallback(
+    (incoming) => {
+      setMessages((prev) => {
+        const next = prev.some((item) => item.id === incoming.id)
+          ? prev.map((item) => (item.id === incoming.id ? incoming : item))
+          : [...prev, incoming];
+        const pruned = pruneMessages(next);
+        writeCache(pruned);
+        return pruned;
+      });
+    },
+    [pruneMessages, writeCache],
+  );
 
   useEffect(() => {
     let unsubscribe;
     let active = true;
 
+    const cached = readCache();
+    if (cached && active) {
+      const pruned = pruneMessages(cached);
+      setMessages(pruned);
+    }
+
     const loadMessages = async () => {
       try {
-        const result = await pb.collection("messages").getList(1, 80, {
+        const result = await pb.collection("messages").getFullList({
           sort: "created",
           expand: "author",
         });
         if (active) {
-          setMessages(result.items);
+          const pruned = pruneMessages(result);
+          setMessages(pruned);
+          writeCache(pruned);
         }
       } catch (error) {
         console.error("메시지 불러오기 실패:", error);
@@ -179,11 +245,7 @@ function ChatRoom({ currentUser, onLogout }) {
               const newMsg = await pb
                 .collection("messages")
                 .getOne(event.record.id, { expand: "author" });
-              setMessages((prev) =>
-                prev.some((item) => item.id === newMsg.id)
-                  ? prev
-                  : [...prev, newMsg],
-              );
+              upsertMessage(newMsg);
             } catch (error) {
               console.error("실시간 메시지 가져오기 실패:", error);
             }
@@ -201,7 +263,7 @@ function ChatRoom({ currentUser, onLogout }) {
       active = false;
       unsubscribe?.();
     };
-  }, []);
+  }, [pruneMessages, readCache, upsertMessage, writeCache]);
 
   useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -221,9 +283,7 @@ function ChatRoom({ currentUser, onLogout }) {
         },
         { expand: "author" },
       );
-      setMessages((prev) =>
-        prev.some((item) => item.id === created.id) ? prev : [...prev, created],
-      );
+      upsertMessage(created);
       setInputText("");
     } catch (error) {
       console.error("메시지 전송 실패:", error);
@@ -236,11 +296,18 @@ function ChatRoom({ currentUser, onLogout }) {
   const displayName =
     currentUser?.name || currentUser?.username || currentUser?.email || "사용자";
 
-  const getSenderName = (msg) =>
-    msg.expand?.author?.name ||
-    msg.expand?.author?.username ||
-    msg.expand?.author?.email ||
-    "알 수 없음";
+  const getSenderName = (msg) => {
+    const author =
+      msg.expand?.author ||
+      (typeof msg.author === "object" ? msg.author : null) ||
+      null;
+    return (
+      author?.name ||
+      author?.username ||
+      author?.email ||
+      "알 수 없음"
+    );
+  };
 
   const getAvatarUrl = (record) => {
     if (!record?.avatar) return null;
@@ -265,7 +332,10 @@ function ChatRoom({ currentUser, onLogout }) {
       <header className="topbar">
         <div className="user-chip">
           <div className="avatar">
-            {(displayName?.[0] || "U").toUpperCase()}
+            {renderAvatar(
+              currentUser,
+              (displayName?.[0] || "U").toUpperCase(),
+            )}
           </div>
           <div>
             <p className="eyebrow">현재 접속</p>
@@ -279,9 +349,19 @@ function ChatRoom({ currentUser, onLogout }) {
 
       <div className="message-list">
         {messages.map((msg, index) => {
-          const isMe = msg.author === currentUser.id;
-          const showName =
-            !isMe && (index === 0 || messages[index - 1].author !== msg.author);
+          const authorId =
+            typeof msg.author === "string"
+              ? msg.author
+              : msg.author?.id || msg.expand?.author?.id;
+          const isMe = authorId === currentUser.id;
+          const senderRecord = msg.expand?.author;
+          const previousAuthor =
+            typeof messages[index - 1]?.author === "string"
+              ? messages[index - 1]?.author
+              : messages[index - 1]?.author?.id ||
+                messages[index - 1]?.expand?.author?.id;
+          const showName = !isMe && (index === 0 || previousAuthor !== authorId);
+          const fallbackInitial = (getSenderName(msg)[0] || "U").toUpperCase();
 
           return (
             <div
@@ -290,10 +370,7 @@ function ChatRoom({ currentUser, onLogout }) {
             >
               {!isMe && (
                 <div className="message-avatar">
-                  {renderAvatar(
-                    msg.expand?.author,
-                    (getSenderName(msg)[0] || "U").toUpperCase(),
-                  )}
+                  {renderAvatar(senderRecord, fallbackInitial)}
                 </div>
               )}
               <div className="bubble-block">
@@ -307,7 +384,7 @@ function ChatRoom({ currentUser, onLogout }) {
               {isMe && (
                 <div className="message-avatar">
                   {renderAvatar(
-                    msg.expand?.author ?? currentUser,
+                    senderRecord ?? currentUser,
                     (displayName[0] || "U").toUpperCase(),
                   )}
                 </div>
