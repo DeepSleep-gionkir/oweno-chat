@@ -2,7 +2,7 @@
   position: relative;
   min-height: 100dvh;
   height: 100dvh;
-  padding: calc(clamp(18px, 3vw, 32px) + var(--safe-top)) 14px calc(clamp(22px, 4vw, 36px) + var(--safe-bottom));
+  padding: calc(12px + var(--safe-top)) 12px calc(14px + var(--safe-bottom));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -36,7 +36,7 @@
   position: relative;
   width: min(1100px, 100%);
   min-height: clamp(520px, 75vh, 760px);
-  height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 28px);
+  height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 12px);
   max-height: 900px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -371,7 +371,7 @@
 .composer {
   display: flex;
   gap: 12px;
-  padding: 18px 18px calc(20px + var(--safe-bottom));
+  padding: 16px 16px calc(16px + var(--safe-bottom));
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(5, 9, 20, 0.55);
   backdrop-filter: blur(12px);
@@ -404,6 +404,7 @@
   .app-card {
     min-height: auto;
     height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 16px);
+    max-height: none;
   }
 
   .login-grid {
@@ -417,12 +418,18 @@
 
 @media (max-width: 720px) {
   .app-shell {
-    padding: calc(18px + var(--safe-top)) 12px calc(16px + var(--safe-bottom));
+    padding: calc(10px + var(--safe-top)) 10px calc(12px + var(--safe-bottom));
+    align-items: stretch;
   }
 
   .login-form,
   .login-hero {
     padding: 34px 26px;
+  }
+
+  .app-card {
+    height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
+    border-radius: 18px;
   }
 
   .topbar {
@@ -466,5 +473,16 @@
   .login-hero,
   .login-form {
     padding: 26px 22px;
+  }
+}
+
+@media (max-height: 740px) {
+  .login-hero,
+  .login-form {
+    padding: 24px 20px;
+  }
+
+  .app-card {
+    min-height: auto;
   }
 }

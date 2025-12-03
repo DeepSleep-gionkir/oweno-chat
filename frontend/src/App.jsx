@@ -180,11 +180,6 @@ function ChatRoom({ currentUser, onLogout }) {
     [sortMessages],
   );
 
-  const trimForCache = useCallback(
-    (list) => sortMessages(list).slice(-MESSAGES_PER_PAGE * 2),
-    [sortMessages, MESSAGES_PER_PAGE],
-  );
-
   const readCache = useCallback(() => {
     try {
       const raw = localStorage.getItem(cacheKey);
@@ -201,12 +196,12 @@ function ChatRoom({ currentUser, onLogout }) {
   const writeCache = useCallback(
     (list) => {
       try {
-        localStorage.setItem(cacheKey, JSON.stringify(trimForCache(list)));
+        localStorage.setItem(cacheKey, JSON.stringify(list));
       } catch (error) {
         console.error("캐시 저장 실패:", error);
       }
     },
-    [cacheKey, trimForCache],
+    [cacheKey],
   );
 
   const upsertMessage = useCallback(
@@ -214,11 +209,11 @@ function ChatRoom({ currentUser, onLogout }) {
       lastUpdateRef.current = "new";
       setMessages((prev) => {
         const merged = mergeMessages(prev, [incoming]);
-        writeCache(trimForCache(merged));
+        writeCache(merged);
         return merged;
       });
     },
-    [mergeMessages, trimForCache, writeCache],
+    [mergeMessages, writeCache],
   );
 
   const loadOlder = useCallback(async () => {
@@ -240,7 +235,7 @@ function ChatRoom({ currentUser, onLogout }) {
       setNextPage(res.page + 1);
       setMessages((prev) => {
         const merged = mergeMessages(res.items, prev);
-        writeCache(trimForCache(merged));
+        writeCache(merged);
         return merged;
       });
 
@@ -258,15 +253,7 @@ function ChatRoom({ currentUser, onLogout }) {
     } finally {
       setIsLoadingOlder(false);
     }
-  }, [
-    MESSAGES_PER_PAGE,
-    hasMore,
-    isLoadingOlder,
-    mergeMessages,
-    nextPage,
-    trimForCache,
-    writeCache,
-  ]);
+  }, [MESSAGES_PER_PAGE, hasMore, isLoadingOlder, mergeMessages, nextPage, writeCache]);
 
   useEffect(() => {
     let unsubscribe;
@@ -278,20 +265,32 @@ function ChatRoom({ currentUser, onLogout }) {
       setMessages(sorted);
     }
 
-    const loadMessages = async () => {
+    const fetchAllMessages = async () => {
       try {
-        const result = await pb
-          .collection("messages")
-          .getList(1, MESSAGES_PER_PAGE, {
-            sort: "-created",
-            expand: "author",
-          });
+        let page = 1;
+        let totalPages = 1;
+        let all = [];
+
+        do {
+          const res = await pb.collection("messages").getList(
+            page,
+            MESSAGES_PER_PAGE,
+            {
+              sort: "-created",
+              expand: "author",
+            },
+          );
+          totalPages = res.totalPages;
+          all = mergeMessages(all, res.items);
+          page += 1;
+        } while (page <= totalPages && active);
+
         if (active) {
-          const merged = mergeMessages([], result.items);
-          setMessages(merged);
-          writeCache(trimForCache(merged));
-          setNextPage(result.page + 1);
-          setHasMore(result.page < result.totalPages);
+          const sorted = sortMessages(all);
+          setMessages(sorted);
+          writeCache(sorted);
+          setNextPage(totalPages + 1);
+          setHasMore(false);
           lastUpdateRef.current = "new";
         }
       } catch (error) {
@@ -320,22 +319,14 @@ function ChatRoom({ currentUser, onLogout }) {
       }
     };
 
-    loadMessages();
+    fetchAllMessages();
     subscribeMessages();
 
     return () => {
       active = false;
       unsubscribe?.();
     };
-  }, [
-    MESSAGES_PER_PAGE,
-    mergeMessages,
-    readCache,
-    sortMessages,
-    trimForCache,
-    upsertMessage,
-    writeCache,
-  ]);
+  }, [MESSAGES_PER_PAGE, mergeMessages, readCache, sortMessages, upsertMessage, writeCache]);
 
   useEffect(() => {
     const el = listRef.current;
