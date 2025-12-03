@@ -146,10 +146,16 @@ function LoginScreen({ onLogin }) {
 }
 
 function ChatRoom({ currentUser, onLogout }) {
+  const MESSAGES_PER_PAGE = 100;
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [nextPage, setNextPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const scrollRef = useRef(null);
+  const listRef = useRef(null);
+  const lastUpdateRef = useRef("new");
   const cacheKey = useMemo(
     () => `chat-cache-${currentUser?.id || "anonymous"}`,
     [currentUser?.id],
@@ -163,12 +169,20 @@ function ChatRoom({ currentUser, onLogout }) {
     [],
   );
 
-  const pruneMessages = useCallback(
-    (list, limit = 100) => {
-      const sorted = sortMessages(list);
-      return sorted.slice(-limit);
+  const mergeMessages = useCallback(
+    (existing, incoming) => {
+      const map = new Map();
+      [...existing, ...incoming].forEach((msg) => {
+        map.set(msg.id, msg);
+      });
+      return sortMessages([...map.values()]);
     },
     [sortMessages],
+  );
+
+  const trimForCache = useCallback(
+    (list) => sortMessages(list).slice(-MESSAGES_PER_PAGE * 2),
+    [sortMessages, MESSAGES_PER_PAGE],
   );
 
   const readCache = useCallback(() => {
@@ -187,27 +201,72 @@ function ChatRoom({ currentUser, onLogout }) {
   const writeCache = useCallback(
     (list) => {
       try {
-        localStorage.setItem(cacheKey, JSON.stringify(list));
+        localStorage.setItem(cacheKey, JSON.stringify(trimForCache(list)));
       } catch (error) {
         console.error("캐시 저장 실패:", error);
       }
     },
-    [cacheKey],
+    [cacheKey, trimForCache],
   );
 
   const upsertMessage = useCallback(
     (incoming) => {
+      lastUpdateRef.current = "new";
       setMessages((prev) => {
-        const next = prev.some((item) => item.id === incoming.id)
-          ? prev.map((item) => (item.id === incoming.id ? incoming : item))
-          : [...prev, incoming];
-        const pruned = pruneMessages(next);
-        writeCache(pruned);
-        return pruned;
+        const merged = mergeMessages(prev, [incoming]);
+        writeCache(trimForCache(merged));
+        return merged;
       });
     },
-    [pruneMessages, writeCache],
+    [mergeMessages, trimForCache, writeCache],
   );
+
+  const loadOlder = useCallback(async () => {
+    if (!hasMore || isLoadingOlder || nextPage <= 1) return;
+    const listEl = listRef.current;
+    const prevHeight = listEl?.scrollHeight ?? 0;
+    const prevTop = listEl?.scrollTop ?? 0;
+
+    setIsLoadingOlder(true);
+    lastUpdateRef.current = "older";
+
+    try {
+      const res = await pb.collection("messages").getList(
+        nextPage,
+        MESSAGES_PER_PAGE,
+        { sort: "-created", expand: "author" },
+      );
+      setHasMore(res.page < res.totalPages);
+      setNextPage(res.page + 1);
+      setMessages((prev) => {
+        const merged = mergeMessages(res.items, prev);
+        writeCache(trimForCache(merged));
+        return merged;
+      });
+
+      requestAnimationFrame(() => {
+        const el = listRef.current;
+        if (el) {
+          const newHeight = el.scrollHeight;
+          el.scrollTop = prevTop + (newHeight - prevHeight);
+        }
+        lastUpdateRef.current = "new";
+      });
+    } catch (error) {
+      console.error("이전 메시지 로드 실패:", error);
+      lastUpdateRef.current = "new";
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [
+    MESSAGES_PER_PAGE,
+    hasMore,
+    isLoadingOlder,
+    mergeMessages,
+    nextPage,
+    trimForCache,
+    writeCache,
+  ]);
 
   useEffect(() => {
     let unsubscribe;
@@ -215,20 +274,25 @@ function ChatRoom({ currentUser, onLogout }) {
 
     const cached = readCache();
     if (cached && active) {
-      const pruned = pruneMessages(cached);
-      setMessages(pruned);
+      const sorted = sortMessages(cached);
+      setMessages(sorted);
     }
 
     const loadMessages = async () => {
       try {
-        const result = await pb.collection("messages").getFullList({
-          sort: "created",
-          expand: "author",
-        });
+        const result = await pb
+          .collection("messages")
+          .getList(1, MESSAGES_PER_PAGE, {
+            sort: "-created",
+            expand: "author",
+          });
         if (active) {
-          const pruned = pruneMessages(result);
-          setMessages(pruned);
-          writeCache(pruned);
+          const merged = mergeMessages([], result.items);
+          setMessages(merged);
+          writeCache(trimForCache(merged));
+          setNextPage(result.page + 1);
+          setHasMore(result.page < result.totalPages);
+          lastUpdateRef.current = "new";
         }
       } catch (error) {
         console.error("메시지 불러오기 실패:", error);
@@ -263,9 +327,30 @@ function ChatRoom({ currentUser, onLogout }) {
       active = false;
       unsubscribe?.();
     };
-  }, [pruneMessages, readCache, upsertMessage, writeCache]);
+  }, [
+    MESSAGES_PER_PAGE,
+    mergeMessages,
+    readCache,
+    sortMessages,
+    trimForCache,
+    upsertMessage,
+    writeCache,
+  ]);
 
   useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      if (el.scrollTop < 80 && hasMore && !isLoadingOlder) {
+        loadOlder();
+      }
+    };
+    el.addEventListener("scroll", onScroll);
+    return () => el.removeEventListener("scroll", onScroll);
+  }, [hasMore, isLoadingOlder, loadOlder]);
+
+  useEffect(() => {
+    if (lastUpdateRef.current === "older") return;
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
@@ -295,6 +380,7 @@ function ChatRoom({ currentUser, onLogout }) {
 
   const displayName =
     currentUser?.name || currentUser?.username || currentUser?.email || "사용자";
+  const currentUserId = currentUser?.id || pb.authStore.model?.id;
 
   const getSenderName = (msg) => {
     const author =
@@ -310,9 +396,16 @@ function ChatRoom({ currentUser, onLogout }) {
   };
 
   const getAvatarUrl = (record) => {
-    if (!record?.avatar) return null;
+    if (!record) return null;
+    const fileField =
+      record.avatar ||
+      record.photo ||
+      record.profile ||
+      record.image ||
+      record.picture;
+    if (!fileField) return null;
     try {
-      return pb.files.getUrl(record, record.avatar, { thumb: "100x100" });
+      return pb.files.getUrl(record, fileField, { thumb: "100x100" });
     } catch (error) {
       console.error("아바타 URL 생성 실패:", error);
       return null;
@@ -347,13 +440,16 @@ function ChatRoom({ currentUser, onLogout }) {
         </button>
       </header>
 
-      <div className="message-list">
+      <div className="message-list" ref={listRef}>
+        {isLoadingOlder && hasMore && (
+          <div className="loading-older">이전 메시지 불러오는 중...</div>
+        )}
         {messages.map((msg, index) => {
           const authorId =
             typeof msg.author === "string"
               ? msg.author
               : msg.author?.id || msg.expand?.author?.id;
-          const isMe = authorId === currentUser.id;
+          const isMe = authorId === currentUserId;
           const senderRecord = msg.expand?.author;
           const previousAuthor =
             typeof messages[index - 1]?.author === "string"

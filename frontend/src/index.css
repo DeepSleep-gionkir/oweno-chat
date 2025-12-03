@@ -8,6 +8,8 @@
   --text-primary: #e2e8f0;
   --muted: #94a3b8;
   --accent: #f97316;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
