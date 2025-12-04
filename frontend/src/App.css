@@ -2,9 +2,9 @@
   position: relative;
   min-height: 100dvh;
   height: 100dvh;
-  padding: calc(12px + var(--safe-top)) 12px calc(14px + var(--safe-bottom));
+  padding: calc(8px + var(--safe-top)) 10px calc(10px + var(--safe-bottom));
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   overflow: hidden;
   color: var(--text-primary);
@@ -35,9 +35,9 @@
 .app-card {
   position: relative;
   width: min(1100px, 100%);
-  min-height: clamp(520px, 75vh, 760px);
+  min-height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 12px);
   height: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 12px);
-  max-height: 900px;
+  max-height: none;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 28px;
@@ -277,6 +277,7 @@
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.03));
 }
 
@@ -429,6 +430,7 @@
 
   .app-card {
     height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
+    min-height: calc(100dvh - var(--safe-top) - var(--safe-bottom));
     border-radius: 18px;
   }
 
