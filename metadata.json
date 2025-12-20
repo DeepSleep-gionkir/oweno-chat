@@ -1,0 +1,8 @@
+{
+  "name": "Gemini Chat Friends",
+  "description": "A beautiful, mobile-friendly chat application with pre-defined friend accounts and AI-powered smart features.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
