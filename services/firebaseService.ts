@@ -4,15 +4,14 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
-// 사용자가 설정한 환경변수를 사용하도록 구성
-// 실제 운영시에는 Firebase 콘솔에서 제공하는 구성 객체로 대체해야 합니다.
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyBYaGr06yACVb8L6Mo8vpr_PowyZ1kWpxo",
+  authDomain: "oweno-chat.firebaseapp.com",
+  projectId: "oweno-chat",
+  storageBucket: "oweno-chat.firebasestorage.app",
+  messagingSenderId: "758511269476",
+  appId: "1:758511269476:web:cbdb18fccd6b1928c41171",
+  measurementId: "G-GL63QNG855"
 };
 
 const app = initializeApp(firebaseConfig);
